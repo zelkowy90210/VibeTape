@@ -1,271 +1,311 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
+
+const API_URL = 'http://localhost:5000/api/recommend';
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds)) return '00:00';
+
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const remainingSeconds = Math.floor(seconds % 60).toString().padStart(2, '0');
+
+  return `${minutes}:${remainingSeconds}`;
+}
 
 export default function App() {
   const [prompt, setPrompt] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState(null);
   const [tracks, setTracks] = useState([]);
+  const [analysis, setAnalysis] = useState(null);
   const [activeTrackIndex, setActiveTrackIndex] = useState(0);
-
-  // Odtwarzacz
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+
   const audioRef = useRef(null);
+  const activeTrack = tracks[activeTrackIndex] ?? null;
 
-  const activeTrack = tracks[activeTrackIndex] || null;
+  async function handleSubmit(event) {
+    event.preventDefault();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
     if (!prompt.trim() || loading) return;
 
     setLoading(true);
+    setError('');
+
     try {
-      const response = await axios.post('http://localhost:5000/api/recommend', {
-        userPrompt: prompt
+      const response = await axios.post(API_URL, {
+        userPrompt: prompt.trim(),
       });
 
-      if (response.data) {
-        setAnalysis(response.data.analysis);
-        setTracks(response.data.tracks || []);
-        setActiveTrackIndex(0);
-        setCurrentTime(0);
+      setTracks(response.data.randomTracks ?? []);
+      setAnalysis(response.data.analysis ?? response.data.aiParams ?? null);
+      setActiveTrackIndex(0);
+      setCurrentTime(0);
+      setDuration(0);
+      setIsPlaying(false);
+
+      if (!response.data.randomTracks?.length) {
+        setError('Nie znaleziono utworów. Spróbuj opisać nastrój inaczej.');
       }
-    } catch (err) {
-      console.error('Błąd pobierania utworów:', err);
+    } catch (requestError) {
+      console.error('Nie udało się pobrać utworów:', requestError);
+      setError('Nie udało się pobrać muzyki. Sprawdź, czy backend działa.');
+      setTracks([]);
+      setAnalysis(null);
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  // Automatyczny start muzyki po znalezieniu
   useEffect(() => {
-    if (activeTrack && audioRef.current) {
-      audioRef.current.load();
-      audioRef.current.play()
+    const audio = audioRef.current;
+    if (!audio || !activeTrack) return;
+
+    audio.load();
+    audio.play()
+      .then(() => setIsPlaying(true))
+      .catch(() => setIsPlaying(false));
+  }, [activeTrackIndex, tracks, activeTrack]);
+
+  function togglePlay() {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (audio.paused) {
+      audio.play()
         .then(() => setIsPlaying(true))
         .catch(() => setIsPlaying(false));
-    }
-  }, [activeTrackIndex, tracks]);
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      audio.pause();
+      setIsPlaying(false);
     }
-  };
+  }
 
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-      setDuration(audioRef.current.duration || 0);
-    }
-  };
+  function handleSeek(event) {
+    const newTime = Number(event.target.value);
 
-  const handleSeek = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const width = rect.width;
-    const newTime = (clickX / width) * duration;
     if (audioRef.current) {
       audioRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
     }
-  };
 
-  const formatTime = (secs) => {
-    if (isNaN(secs)) return '00:00';
-    const m = Math.floor(secs / 60).toString().padStart(2, '0');
-    const s = Math.floor(secs % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
+    setCurrentTime(newTime);
+  }
+
+  function playNextTrack() {
+    if (activeTrackIndex < tracks.length - 1) {
+      setActiveTrackIndex((index) => index + 1);
+    } else {
+      setIsPlaying(false);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-[#0b0c0e] text-[#d8dee9] flex flex-col justify-between p-6 sm:p-12 font-mono">
-      
-      {/* UKRYTE AUDIO */}
-      {activeTrack && (
-        <audio
-          ref={audioRef}
-          src={activeTrack.audio}
-          onTimeUpdate={handleTimeUpdate}
-          onEnded={() => {
-            if (activeTrackIndex < tracks.length - 1) {
-              setActiveTrackIndex(prev => prev + 1);
-            } else {
-              setIsPlaying(false);
-            }
-          }}
-        />
-      )}
+    <div className="min-h-screen bg-[#090910] px-4 py-8 text-gray-100 sm:px-8">
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Pirata+One&display=swap');
+        @keyframes vinyl-spin { to { transform: rotate(360deg); } }
+      `}</style>
+      <div className="mx-auto max-w-5xl">
+        <header className="mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-5">
+          <div>
+            <h1 className="font-['Pirata_One',serif] inline-block cursor-default text-5xl leading-none tracking-wide text-white sm:text-6xl">
+              Vibe<span className="text-[#e0245e]">Tape</span>
+            </h1>
+            <p className="mt-2 text-[11px] uppercase tracking-[0.25em] text-[#9a95b0]">
+              // Twój inteligentny kurator muzyki
+            </p>
+          </div>
 
-      {/* PROSTY, ELEGANCKI NAGŁÓWEK */}
-      <header className="border-b border-[#22272e] pb-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold tracking-wider text-white">VIBETAPE</h1>
-          <p className="text-xs text-[#00ffa3] mt-1">Twój inteligentny kurator muzyki</p>
-        </div>
-        <div className="text-xs text-[#5e6773]">
-          {loading ? 'Szukam utworu...' : isPlaying ? 'Odtwarzanie' : 'Gotowy'}
-        </div>
-      </header>
+          <p className="text-sm text-gray-400" role="status" aria-live="polite">
+            {loading ? 'Szukam muzyki…' : isPlaying ? 'Odtwarzanie' : 'Gotowy'}
+          </p>
+        </header>
 
-      {/* GŁÓWNA CZĘŚĆ STRONY */}
-      <main className="my-10 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-        
-        {/* LEWA STRONA: WYSZUKIWARKA I CECHY */}
-        <div className="lg:col-span-5 flex flex-col gap-6">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-            <label className="text-xs text-[#5e6773]">
-              Opisz swój nastrój, sytuację lub czego chcesz posłuchać:
-            </label>
-            <div className="flex flex-col sm:flex-row border border-[#22272e] bg-[#14171a] focus-within:border-[#00ffa3]">
-              <input
-                type="text"
+        <main className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <section className="space-y-6">
+            <form
+              onSubmit={handleSubmit}
+              className="rounded-xl border border-white/10 bg-white/[0.03] p-5"
+            >
+              <label htmlFor="mood" className="mb-3 block text-sm font-medium">
+                Na co masz dziś ochotę?
+              </label>
+
+              <textarea
+                id="mood"
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="np. Spokojny wieczór przy książce..."
-                className="flex-1 bg-transparent px-4 py-3 text-sm text-white placeholder-[#5e6773] focus:outline-none"
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="Np. spokojna muzyka na wieczór przy książce…"
+                rows={4}
+                className="w-full resize-y rounded-lg border border-white/10 bg-black/30 p-3 text-sm outline-none transition focus:border-pink-500"
               />
+
               <button
                 type="submit"
-                disabled={loading}
-                className="bg-[#00ffa3] text-black font-bold text-xs px-6 py-3 uppercase tracking-wider hover:bg-white transition-colors disabled:opacity-50"
+                disabled={loading || !prompt.trim()}
+                className="mt-3 w-full rounded-lg bg-pink-600 px-4 py-3 text-sm font-semibold transition hover:bg-pink-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {loading ? 'Szukam...' : 'Znajdź muzykę'}
+                {loading ? 'Szukam…' : 'Znajdź muzykę'}
               </button>
-            </div>
-          </form>
 
-          {/* PARAMETRY ROZPOZNANE PRZEZ AI */}
-          {analysis && (
-            <div className="border border-[#22272e] bg-[#14171a] p-4 text-xs space-y-2">
-              <span className="text-[#5e6773] block mb-2 border-b border-[#22272e] pb-1">Rozpoznany klimat:</span>
-              <div className="flex justify-between">
-                <span className="text-[#5e6773]">Gatunek:</span>
-                <span className="text-[#00ffa3] uppercase font-bold">{analysis.genre}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#5e6773]">Nastrój:</span>
-                <span className="text-white uppercase font-bold">{analysis.mood}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#5e6773]">Brzmienie:</span>
-                <span className="text-white uppercase font-bold">{analysis.acousticelectric}</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* PRAWA STRONA: OBRACAJĄCA SIĘ PŁYTA I ODTWARZACZ */}
-        <div className="lg:col-span-7 flex flex-col sm:flex-row items-center gap-8 bg-[#14171a] border border-[#22272e] p-8">
-          
-          {activeTrack ? (
-            <>
-              {/* OBRACAJĄCY SIĘ WINYL */}
-              <div className="relative w-48 h-48 sm:w-56 sm:h-56 flex-shrink-0">
-                <div 
-                  className={`w-full h-full rounded-full border-4 border-[#22272e] bg-[#0b0c0e] relative flex items-center justify-center transition-all ${
-                    isPlaying ? 'animate-spin' : ''
-                  }`}
-                  style={{
-                    animationDuration: '10s',
-                    backgroundImage: 'radial-gradient(circle, #1a1d20 10%, #0b0c0e 11%, #1a1d20 25%, #0b0c0e 26%, #1a1d20 45%, #0b0c0e 46%, #1a1d20 70%, #0b0c0e 71%)'
-                  }}
-                >
-                  {/* OKŁADKA NA ŚRODKU PŁYTY */}
-                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-[#22272e] relative z-10">
-                    <img 
-                      src={activeTrack.image} 
-                      alt={activeTrack.name}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  {/* DZIURKA W ŚRODKU PŁYTY */}
-                  <div className="w-4 h-4 rounded-full bg-[#0b0c0e] border border-[#22272e] absolute z-20"></div>
-                </div>
-              </div>
-
-              {/* DANE UTWORU I PASEK POSTĘPU */}
-              <div className="flex-1 w-full">
-                <h2 className="text-lg sm:text-xl font-bold text-white truncate">
-                  {activeTrack.name}
-                </h2>
-                <p className="text-xs text-[#00ffa3] mt-1">
-                  {activeTrack.artist}
+              {error && (
+                <p className="mt-3 text-sm text-red-300" role="alert">
+                  {error}
                 </p>
+              )}
+            </form>
 
-                {/* PASEK CZASU I SUWAK */}
-                <div className="my-6">
-                  <div 
-                    onClick={handleSeek}
-                    className="w-full h-2 bg-[#0b0c0e] border border-[#22272e] cursor-pointer relative"
-                  >
-                    <div 
-                      className="h-full bg-[#00ffa3] transition-all duration-75"
-                      style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
-                    />
+            {analysis && (
+              <section className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+                <h2 className="mb-3 font-semibold">Rozpoznany klimat</h2>
+                <dl className="space-y-2 text-sm">
+                  {[
+                    ['Gatunek', analysis.genre],
+                    ['Nastrój', analysis.mood],
+                    ['Brzmienie', analysis.acousticelectric],
+                    ['Tempo', analysis.tempo],
+                  ]
+                    .filter(([, value]) => value)
+                    .map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-4">
+                        <dt className="text-gray-400">{label}</dt>
+                        <dd className="text-right">{value}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </section>
+            )}
+          </section>
+
+          <section
+            className="flex min-h-80 flex-col justify-center rounded-xl border border-white/10 bg-white/[0.03] p-5 sm:p-7"
+            aria-label="Odtwarzacz"
+          >
+            {activeTrack ? (
+              <>
+                <audio
+                  ref={audioRef}
+                  src={activeTrack.audio}
+                  onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
+                  onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onEnded={playNextTrack}
+                />
+
+                <div className="flex flex-col items-center gap-6 sm:flex-row">
+                  <div className="relative h-48 w-48 shrink-0" aria-label={`Płyta gramofonowa: ${activeTrack.name}`} role="img">
+                    <div
+                      className="absolute inset-1 rounded-full border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+                      style={{
+                        animation: isPlaying ? 'vinyl-spin 5s linear infinite' : 'none',
+                        backgroundImage: 'radial-gradient(circle, transparent 0 25%, rgba(255,255,255,0.10) 25.5%, transparent 26%, transparent 32%, rgba(255,255,255,0.08) 32.5%, transparent 33%, transparent 40%, rgba(255,255,255,0.08) 40.5%, transparent 41%, transparent 48%, rgba(255,255,255,0.07) 48.5%, transparent 49%, transparent 56%, rgba(255,255,255,0.07) 56.5%, transparent 57%, transparent 64%, rgba(255,255,255,0.06) 64.5%, transparent 65%), repeating-radial-gradient(circle at center, #09090d 0px, #171720 2px, #09090d 4px, #11111a 6px)',
+                      }}
+                    >
+                      <div className="absolute inset-[29%] overflow-hidden rounded-full border-4 border-[#272733] shadow-inner">
+                        <img
+                          src={activeTrack.image}
+                          alt={`Okładka: ${activeTrack.name}`}
+                          className="h-full w-full rounded-full object-cover"
+                        />
+                      </div>
+                      <span className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-gray-500 bg-[#08080b]" />
+                    </div>
+                    <div aria-hidden="true" className="absolute -right-1 top-1 h-20 w-5 rotate-[18deg]">
+                      <span className="absolute right-2 top-0 h-4 w-4 rounded-full border-2 border-gray-500 bg-gray-800 shadow" />
+                      <span className="absolute right-[9px] top-3 h-14 w-[3px] rounded-full bg-gradient-to-b from-gray-300 via-gray-500 to-gray-700" />
+                      <span className="absolute right-[5px] top-[58px] h-3 w-2 rotate-12 rounded-sm bg-gray-400" />
+                    </div>
                   </div>
-                  <div className="flex justify-between text-[11px] text-[#5e6773] mt-2">
+
+                  <div className="min-w-0 flex-1 text-center sm:text-left">
+                    <p className="mb-2 text-xs uppercase tracking-widest text-pink-400">
+                      Teraz odtwarzane
+                    </p>
+                    <h2 className="break-words text-xl font-bold">{activeTrack.name}</h2>
+                    <p className="mt-1 text-sm text-gray-400">{activeTrack.artist}</p>
+
+                    <button
+                      type="button"
+                      onClick={togglePlay}
+                      className="mt-5 rounded-lg bg-pink-600 px-6 py-2.5 text-sm font-semibold hover:bg-pink-500"
+                    >
+                      {isPlaying ? 'Pauza' : 'Odtwórz'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-7">
+                  <input
+                    type="range"
+                    min="0"
+                    max={duration || 0}
+                    step="0.1"
+                    value={Math.min(currentTime, duration || 0)}
+                    onChange={handleSeek}
+                    disabled={!duration}
+                    aria-label="Pozycja w utworze"
+                    className="w-full accent-pink-500 disabled:opacity-50"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400">
                     <span>{formatTime(currentTime)}</span>
                     <span>{formatTime(duration)}</span>
                   </div>
                 </div>
-
-                {/* PRZYCISK PLAY / PAUZA */}
-                <button
-                  onClick={togglePlay}
-                  className="border border-[#22272e] bg-[#0b0c0e] px-6 py-2 text-xs font-bold uppercase hover:border-[#00ffa3] hover:text-[#00ffa3] transition-colors"
-                >
-                  {isPlaying ? 'Pauza' : 'Odtwórz'}
-                </button>
+              </>
+            ) : (
+              <div className="py-10 text-center">
+                <p className="text-xl font-semibold">Czas na muzykę</p>
+                <p className="mt-2 text-sm text-gray-400">
+                  Opisz swój nastrój, a znajdziemy coś dla Ciebie.
+                </p>
               </div>
-            </>
-          ) : (
-            <div className="w-full py-16 text-center text-xs text-[#5e6773]">
-              Wpisz swój nastrój powyżej, aby odkryć muzykę.
-            </div>
-          )}
+            )}
+          </section>
+        </main>
 
-        </div>
+        {tracks.length > 0 && (
+          <section className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+            <h2 className="mb-3 font-semibold">Znalezione utwory ({tracks.length})</h2>
+            <ul className="divide-y divide-white/10">
+              {tracks.map((track, index) => {
+                const isActive = index === activeTrackIndex;
 
-      </main>
+                return (
+                  <li key={track.id}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTrackIndex(index)}
+                      aria-current={isActive ? 'true' : undefined}
+                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition hover:bg-white/5 ${
+                        isActive ? 'text-pink-400' : 'text-gray-100'
+                      }`}
+                    >
+                      <img
+                        src={track.image}
+                        alt=""
+                        className="h-11 w-11 rounded-md object-cover"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{track.name}</span>
+                        <span className="mt-1 block truncate text-xs text-gray-400">{track.artist}</span>
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {isActive && isPlaying ? 'Odtwarzane' : isActive ? 'Wybrany' : 'Odtwórz'}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
-      {/* LISTA ZNALEZIONYCH UTWORÓW */}
-      {tracks.length > 0 && (
-        <section className="border border-[#22272e] bg-[#14171a] p-4">
-          <div className="text-xs text-[#5e6773] mb-3 pb-2 border-b border-[#22272e]">
-            Znalezione utwory ({tracks.length}):
-          </div>
-          <div className="divide-y divide-[#22272e] text-xs">
-            {tracks.map((track, idx) => (
-              <div
-                key={track.id}
-                onClick={() => setActiveTrackIndex(idx)}
-                className={`py-3 px-2 flex justify-between items-center cursor-pointer transition-colors ${
-                  activeTrackIndex === idx ? 'text-[#00ffa3] font-bold' : 'hover:text-white text-[#5e6773]'
-                }`}
-              >
-                <div className="flex items-center gap-3 truncate">
-                  <span>0{idx + 1}.</span>
-                  <span className="truncate">{track.name}</span>
-                  <span className="text-[#5e6773] truncate">– {track.artist}</span>
-                </div>
-                <span>{activeTrackIndex === idx && isPlaying ? 'Odtwarzane' : 'Wybierz'}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      <footer className="mt-8 pt-4 border-t border-[#22272e] text-[11px] text-[#5e6773] text-center">
-        VibeTape – Jakub Lewkowicz
-      </footer>
-
+        <footer className="mt-8 border-t border-white/10 pt-4 text-center text-xs text-gray-500">
+          VibeTape
+        </footer>
+      </div>
     </div>
   );
 }
