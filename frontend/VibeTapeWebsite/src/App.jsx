@@ -51,7 +51,7 @@ export default function App() {
       }
     } catch (requestError) {
       console.error('Nie udało się pobrać utworów:', requestError);
-      setError('Nie udało się pobrać muzyki. Sprawdź, czy backend działa.');
+      setError('Nie udało się pobrać muzyki. Sprawdź, czy backend i Langflow działają');
       setTracks([]);
       setAnalysis(null);
     } finally {
@@ -113,12 +113,12 @@ export default function App() {
               Vibe<span className="text-[#e0245e]">Tape</span>
             </h1>
             <p className="mt-2 text-[11px] uppercase tracking-[0.25em] text-[#9a95b0]">
-              // Twój inteligentny kurator muzyki
+              Twój inteligentny asystent muzyczny
             </p>
           </div>
 
           <p className="text-sm text-gray-400" role="status" aria-live="polite">
-            {loading ? 'Szukam muzyki…' : isPlaying ? 'Odtwarzanie' : 'Gotowy'}
+            {loading ? 'Szukam muzyki…' : isPlaying ? `Aktualnie gramy: ${activeTrack.name} od ${activeTrack.artist}` : 'Gotowy'}
           </p>
         </header>
 
@@ -303,7 +303,7 @@ export default function App() {
         )}
 
         <footer className="mt-8 border-t border-white/10 pt-4 text-center text-xs text-gray-500">
-          VibeTape
+          VibeTape - wykonane przez elozelo
         </footer>
       </div>
     </div>

@@ -117,7 +117,10 @@ app.post('/api/recommend', async (req, res) => {
         res.status(500).json({ error: 'Błąd serwera', details: error.message });
     }
 });
-
+app.post('/api/artist', async (req, res) => {
+    var {artistName} = req.body
+    res.send(artistName)
+})
 app.get('/', (req, res) => {
     res.send(`Backend VibeTape działa na porcie: ${PORT}`);
 });
