@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { raw } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
@@ -118,9 +118,42 @@ app.post('/api/recommend', async (req, res) => {
     }
 });
 app.post('/api/artist', async (req, res) => {
-    var {artistName} = req.body
-    res.send(artistName)
-})
+    const { artistName } = req.body;
+
+    if (!artistName || artistName.trim().length === 0) {
+        return res.status(400).json({ error: 'Nazwa artysty jest pusta' });
+    }
+
+    const artistNameEncoded = encodeURIComponent(artistName);
+    const jamendoApiUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=50&artist_name=${artistNameEncoded}&audioformat=mp32`;
+
+    try {
+        const response = await fetch(jamendoApiUrl);
+        const data = await response.json();
+        const rawResults = data.results || [];
+        if(typeof(rawResults) === 'undefined' || rawResults.length === 0){
+            return res.status(404).json({ error: 'Nie znaleziono utworów dla podanego artysty' });
+        }
+        const tracks = rawResults.map((track) => ({
+            id: track.id,
+            name: track.name,
+            artist: track.artist_name,
+            audio: track.audio,
+            image: track.image,
+        }));
+        for(let i = tracks.length-1; i>=0;i--){
+            var randomNumber = Math.floor(Math.random()*(i+1))
+            var temp = tracks[i]
+            tracks[i] = tracks[randomNumber]
+            tracks[randomNumber] = temp
+        }
+        var slicedTracks = tracks.slice(0,5)
+        return res.json({slicedTracks});
+    } catch (error) {
+        return res.status(500).json({ error: error.message || 'Błąd pobierania artysty' });
+    }
+});
+
 app.get('/', (req, res) => {
     res.send(`Backend VibeTape działa na porcie: ${PORT}`);
 });
