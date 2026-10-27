@@ -17,21 +17,25 @@ app.use(express.urlencoded({ extended: true }));
 function extractAIParams(rawInput) {
     if (typeof rawInput === 'object' && rawInput !== null) {
         return {
-            genre: rawInput.genre || 'rock',
-            mood: rawInput.mood || 'sad',
-            tempo: rawInput.tempo || 'slow'
+            genre: rawInput.genre || 'pop',
+            mood: rawInput.mood || 'happy',
+            vocalinstrumental: rawInput.vocalinstrumental || 'vocal',
+            acousticelectric: rawInput.acousticelectric || 'electric'
         };
     }
     const text = String(rawInput);
     const genreMatch = text.match(/"genre"\s*:\s*"([^"\r\n]+)"/i);
     const moodMatch = text.match(/"mood"\s*:\s*"([^"\r\n]+)"/i);
-    const tempoMatch = text.match(/"tempo"\s*:\s*"([^"\r\n]+)"/i);
+    const vocalMatch = text.match(/"vocalinstrumental"\s*:\s*"([^"\r\n]+)"/i);
+    const acousticMatch = text.match(/"acousticelectric"\s*:\s*"([^"\r\n]+)"/i);
     return {
-        genre: genreMatch ? genreMatch[1].trim() : 'lofi',
-        mood: moodMatch ? moodMatch[1].trim() : 'sad',
-        tempo: tempoMatch ? tempoMatch[1].trim() : 'slow'
+        genre: genreMatch ? genreMatch[1].trim() : 'indie',
+        mood: moodMatch ? moodMatch[1].trim() : 'chill',
+        vocalinstrumental: vocalMatch ? vocalMatch[1].trim() : 'vocal',
+        acousticelectric: acousticMatch ? acousticMatch[1].trim() : 'electric'
     };
 }
+
 
 app.post('/api/recommend', async (req, res) => {
     try {
@@ -62,33 +66,74 @@ app.post('/api/recommend', async (req, res) => {
 
         const aiData = await aiResponse.json();
         const aiOutput = aiData.outputs[0].outputs[0].results.message.data.text;
-        console.log(`[2/3] Otrzymano surowy tekst od AI:\n`, aiOutput);
+        console.log(`[2/3] Otrzymano tekst od AI:`, aiOutput);
         const aiParams = extractAIParams(aiOutput);
-        console.log('[DEBUG] Pomyślnie wyciągnięte parametry:', aiParams);
-        let searchTags = `${aiParams.genre}+${aiParams.mood}+${aiParams.tempo}`;
-        console.log(`[3/3] Szukam w Jamendo utworów z tagami: "${searchTags}"...`);
-        let jamendoUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=50&fuzzytags=${encodeURIComponent(searchTags)}&audioformat=mp32`;
-
+        console.log('[DEBUG] Parametry docelowe:', aiParams);
+        console.log(`[3/3] Szukam w Jamendo utworów z weryfikacją brzmienia...`);
+        const searchTags = `${aiParams.genre}+${aiParams.mood}`;
+        let jamendoUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=40&fuzzytags=${encodeURIComponent(searchTags)}&vocalinstrumental=${aiParams.vocalinstrumental}&acousticelectric=${aiParams.acousticelectric}&include=musicinfo&audioformat=mp32&boost=popularity_month`;
         let jamendoResponse = await fetch(jamendoUrl);
         let jamendoData = await jamendoResponse.json();
         let rawResults = jamendoData.results || [];
         if (rawResults.length === 0) {
-            searchTags = `${aiParams.genre}+${aiParams.mood}`;
-            console.warn(`Brak utworów dla 3 tagów. Próbuję: "${searchTags}"...`);
-            jamendoUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=50&fuzzytags=${encodeURIComponent(searchTags)}&audioformat=mp32`;
+            console.warn(`Brak wyników z filtrami vocal/acoustic. Szukam po samym fuzzytags: "${searchTags}"...`);
+            jamendoUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=40&fuzzytags=${encodeURIComponent(searchTags)}&include=musicinfo&audioformat=mp32&boost=popularity_month`;
             jamendoResponse = await fetch(jamendoUrl);
             jamendoData = await jamendoResponse.json();
             rawResults = jamendoData.results || [];
         }
         if (rawResults.length === 0) {
-            console.warn(`Nadal brak. Szukam po samym gatunku: "${aiParams.genre}"...`);
-            jamendoUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=50&tags=${encodeURIComponent(aiParams.genre)}&audioformat=mp32`;
+            console.warn(`Nadal brak utworów. Szukam po nastroju: "${aiParams.mood}"...`);
+            jamendoUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=40&fuzzytags=${encodeURIComponent(aiParams.mood)}&include=musicinfo&audioformat=mp32&boost=popularity_month`;
             jamendoResponse = await fetch(jamendoUrl);
             jamendoData = await jamendoResponse.json();
             rawResults = jamendoData.results || [];
         }
+        if (rawResults.length === 0) {
+            return res.status(404).json({ error: 'Nie znaleziono pasujących utworów w bazie Jamendo.' });
+        }
+        const conflictingTagsMap = {
+            sad: ['happy', 'party', 'dance', 'fun', 'upbeat', 'festive', 'energetic', 'joy'],
+            calm: ['aggressive', 'hard', 'metal', 'heavy', 'fast', 'action', 'epic', 'punchy'],
+            relaxing: ['screaming', 'loud', 'heavy', 'metal', 'distorted', 'angry', 'hardcore'],
+            melancholic: ['happy', 'party', 'dance', 'club', 'celebration', 'summer'],
+            chill: ['fast', 'hard', 'heavy', 'intense', 'screaming'],
+            energetic: ['sleep', 'lullaby', 'slow', 'sad', 'meditation', 'depressive'],
+            dark: ['happy', 'cute', 'cheerful', 'bright', 'sweet', 'sunshine', 'kids']
+        };
 
-        const tracks = rawResults.map(track => ({
+        const blacklistedTags = conflictingTagsMap[aiParams.mood.toLowerCase()] || [];
+
+        const scoredTracks = rawResults.map(track => {
+            let score = 0;
+            const info = track.musicinfo || {};
+            const trackTags = [
+                ...(info.tags?.genres || []),
+                ...(info.tags?.vartags || []),
+                ...(info.tags?.instruments || [])
+            ].map(t => String(t).toLowerCase());
+            if (trackTags.includes(aiParams.mood.toLowerCase())) score += 5;
+            if (trackTags.includes(aiParams.genre.toLowerCase())) score += 3;
+            if (info.acousticelectric === aiParams.acousticelectric) score += 2;
+            if (info.vocalinstrumental === aiParams.vocalinstrumental) score += 2;
+            const hasConflict = blacklistedTags.some(tag => trackTags.includes(tag));
+            if (hasConflict) score -= 15;
+
+            return { track, score };
+        });
+        const validTracks = scoredTracks
+            .filter(item => item.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .map(item => item.track);
+
+        console.log(`Audyt brzmienia: ${rawResults.length} pobranych -> ${validTracks.length} spełnia kryteria jakości.`);
+        const finalPool = validTracks.length >= 5 ? validTracks : rawResults;
+        const topConsistentPool = finalPool.slice(0, 15);
+        for (let i = topConsistentPool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [topConsistentPool[i], topConsistentPool[j]] = [topConsistentPool[j], topConsistentPool[i]];
+        }
+        const randomTracks = topConsistentPool.slice(0, 5).map(track => ({
             id: track.id,
             name: track.name,
             artist: track.artist_name,
@@ -96,25 +141,14 @@ app.post('/api/recommend', async (req, res) => {
             image: track.image,
         }));
 
-        for (let i = tracks.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
-        }
-
-        const randomTracks = tracks.slice(0, 10);
-
-        if (randomTracks.length === 0) {
-            return res.status(404).json({ error: 'Nie znaleziono utworów w bazie Jamendo.' });
-        }
-
         res.json({
             aiParams,
             randomTracks
         });
 
     } catch (error) {
-        console.error('Błąd serwera:', error.message);
-        res.status(500).json({ error: 'Błąd serwera', details: error.message });
+        console.error('Błąd ogólny serwera:', error.message);
+        res.status(500).json({ error: 'Wystąpił błąd podczas przetwarzania żądania.', details: error.message });
     }
 });
 app.post('/api/artist', async (req, res) => {
